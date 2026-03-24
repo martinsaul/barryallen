@@ -45,7 +45,7 @@ func main() {
 			return
 		case "run":
 			// Run a single speed test and print results (useful for testing)
-			result, err := runSpeedTest()
+			result, err := runSpeedTest(nil)
 			if err != nil {
 				log.Fatalf("Speed test failed: %v", err)
 			}

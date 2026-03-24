@@ -52,6 +52,8 @@ func (s *barryAllenService) Execute(args []string, r <-chan svc.ChangeRequest, c
 		return true, 1
 	}
 
+	blacklist := NewServerBlacklist(dataDir)
+
 	logger.Println("Barry Allen service started")
 	changes <- svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
 
@@ -60,13 +62,13 @@ func (s *barryAllenService) Execute(args []string, r <-chan svc.ChangeRequest, c
 
 	// Run first test immediately
 	go func() {
-		runAndRecord(logger)
+		runAndRecord(logger, blacklist)
 	}()
 
 	for {
 		select {
 		case <-ticker.C:
-			runAndRecord(logger)
+			runAndRecord(logger, blacklist)
 		case c := <-r:
 			switch c.Cmd {
 			case svc.Interrogate:
@@ -80,16 +82,16 @@ func (s *barryAllenService) Execute(args []string, r <-chan svc.ChangeRequest, c
 	}
 }
 
-func runAndRecord(logger *log.Logger) {
+func runAndRecord(logger *log.Logger, blacklist *ServerBlacklist) {
 	logger.Println("Starting speed test...")
-	result, err := runSpeedTest()
+	result, err := runSpeedTest(blacklist)
 	if err != nil {
 		logger.Printf("ERROR: Speed test failed: %v", err)
 		return
 	}
 
-	logger.Printf("Speed test complete: %.2f/%.2f Mbps (down/up), %.2f ms latency, server: %s",
-		result.DownloadMbps, result.UploadMbps, result.LatencyMs, result.ServerName)
+	logger.Printf("Speed test complete: %.2f/%.2f Mbps (down/up), %.2f ms latency, server: %s (%s)",
+		result.DownloadMbps, result.UploadMbps, result.LatencyMs, result.ServerName, result.ServerID)
 
 	if err := appendCSV(result); err != nil {
 		logger.Printf("ERROR: Failed to write CSV: %v", err)

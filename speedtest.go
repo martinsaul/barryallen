@@ -18,9 +18,9 @@ type SpeedTestResult struct {
 	UploadMbps   float64
 }
 
-const maxServersToTry = 5
+const maxServersToTry = 10
 
-func runSpeedTest() (*SpeedTestResult, error) {
+func runSpeedTest(blacklist *ServerBlacklist) (*SpeedTestResult, error) {
 	serverList, err := speedtest.FetchServers()
 	if err != nil {
 		return nil, fmt.Errorf("fetching servers: %w", err)
@@ -30,35 +30,57 @@ func runSpeedTest() (*SpeedTestResult, error) {
 		return nil, fmt.Errorf("no speed test servers found")
 	}
 
-	limit := maxServersToTry
-	if len(serverList) < limit {
-		limit = len(serverList)
-	}
-
+	tried := 0
 	var lastErr error
-	for i := 0; i < limit; i++ {
+	for _, server := range serverList {
+		if tried >= maxServersToTry {
+			break
+		}
+
+		if blacklist != nil && blacklist.IsBlacklisted(server.ID) {
+			continue
+		}
+
+		tried++
 		client := speedtest.New()
-		server := serverList[i]
 		server.Context = client
 
 		if err := server.PingTest(nil); err != nil {
-			lastErr = fmt.Errorf("server %s: ping test: %w", server.Name, err)
+			lastErr = fmt.Errorf("server %s (%s): ping test: %w", server.Name, server.ID, err)
 			continue
 		}
 
 		if err := server.DownloadTest(); err != nil {
-			lastErr = fmt.Errorf("server %s: download test: %w", server.Name, err)
+			lastErr = fmt.Errorf("server %s (%s): download test: %w", server.Name, server.ID, err)
+			if blacklist != nil {
+				blacklist.Strike(server.ID, server.Name, fmt.Sprintf("download error: %v", err))
+			}
 			continue
 		}
 
 		dlMbps := server.DLSpeed.Mbps()
-		if dlMbps < 1.0 {
-			lastErr = fmt.Errorf("server %s: download too low (%.2f Mbps)", server.Name, dlMbps)
+		if dlMbps <= 0 {
+			lastErr = fmt.Errorf("server %s (%s): reported 0 download", server.Name, server.ID)
+			if blacklist != nil {
+				blacklist.Strike(server.ID, server.Name, "reported 0 download speed")
+			}
 			continue
 		}
 
 		if err := server.UploadTest(); err != nil {
-			lastErr = fmt.Errorf("server %s: upload test: %w", server.Name, err)
+			lastErr = fmt.Errorf("server %s (%s): upload test: %w", server.Name, server.ID, err)
+			if blacklist != nil {
+				blacklist.Strike(server.ID, server.Name, fmt.Sprintf("upload error: %v", err))
+			}
+			continue
+		}
+
+		ulMbps := server.ULSpeed.Mbps()
+		if ulMbps <= 0 {
+			lastErr = fmt.Errorf("server %s (%s): reported 0 upload", server.Name, server.ID)
+			if blacklist != nil {
+				blacklist.Strike(server.ID, server.Name, "reported 0 upload speed")
+			}
 			continue
 		}
 
@@ -69,9 +91,12 @@ func runSpeedTest() (*SpeedTestResult, error) {
 			ServerID:     server.ID,
 			LatencyMs:    float64(server.Latency) / float64(time.Millisecond),
 			DownloadMbps: dlMbps,
-			UploadMbps:   server.ULSpeed.Mbps(),
+			UploadMbps:   ulMbps,
 		}, nil
 	}
 
-	return nil, fmt.Errorf("all %d servers failed, last error: %w", limit, lastErr)
+	if tried == 0 {
+		return nil, fmt.Errorf("all servers are blacklisted")
+	}
+	return nil, fmt.Errorf("all %d servers failed, last error: %w", tried, lastErr)
 }
