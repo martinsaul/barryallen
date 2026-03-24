@@ -21,7 +21,11 @@ type SpeedTestResult struct {
 	UploadMbps   float64
 }
 
-const maxServersToTry = 3
+const (
+	maxServersToTry  = 5
+	minDownloadMbps  = 1.0
+	maxLatencyMs     = 100.0
+)
 
 func runSpeedTest() (*SpeedTestResult, error) {
 	httpClient := &http.Client{
@@ -65,8 +69,20 @@ func runSpeedTest() (*SpeedTestResult, error) {
 			continue
 		}
 
+		latencyMs := float64(server.Latency) / float64(time.Millisecond)
+		if latencyMs > maxLatencyMs {
+			lastErr = fmt.Errorf("server %s: latency too high (%.0f ms)", server.Name, latencyMs)
+			continue
+		}
+
 		if err := server.DownloadTest(); err != nil {
 			lastErr = fmt.Errorf("server %s: download test: %w", server.Name, err)
+			continue
+		}
+
+		dlMbps := server.DLSpeed.Mbps()
+		if dlMbps < minDownloadMbps {
+			lastErr = fmt.Errorf("server %s: download too low (%.2f Mbps)", server.Name, dlMbps)
 			continue
 		}
 
@@ -80,8 +96,8 @@ func runSpeedTest() (*SpeedTestResult, error) {
 			ServerName:   server.Name,
 			ServerHost:   server.Host,
 			ServerID:     server.ID,
-			LatencyMs:    float64(server.Latency) / float64(time.Millisecond),
-			DownloadMbps: server.DLSpeed.Mbps(),
+			LatencyMs:    latencyMs,
+			DownloadMbps: dlMbps,
 			UploadMbps:   server.ULSpeed.Mbps(),
 		}, nil
 	}
