@@ -1,10 +1,7 @@
 package main
 
 import (
-	"crypto/tls"
 	"fmt"
-	"net"
-	"net/http"
 	"time"
 
 	"github.com/showwin/speedtest-go/speedtest"
@@ -21,32 +18,10 @@ type SpeedTestResult struct {
 	UploadMbps   float64
 }
 
-const (
-	maxServersToTry  = 5
-	minDownloadMbps  = 1.0
-	maxLatencyMs     = 100.0
-)
+const maxServersToTry = 5
 
 func runSpeedTest() (*SpeedTestResult, error) {
-	httpClient := &http.Client{
-		Timeout: 60 * time.Second,
-		Transport: &http.Transport{
-			DialContext: (&net.Dialer{
-				Timeout:   30 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}).DialContext,
-			ForceAttemptHTTP2:     false,
-			TLSClientConfig:      &tls.Config{},
-			MaxIdleConns:          100,
-			IdleConnTimeout:       90 * time.Second,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
-		},
-	}
-
-	client := speedtest.New(speedtest.WithDoer(httpClient))
-
-	serverList, err := client.FetchServers()
+	serverList, err := speedtest.FetchServers()
 	if err != nil {
 		return nil, fmt.Errorf("fetching servers: %w", err)
 	}
@@ -62,16 +37,12 @@ func runSpeedTest() (*SpeedTestResult, error) {
 
 	var lastErr error
 	for i := 0; i < limit; i++ {
+		client := speedtest.New()
 		server := serverList[i]
+		server.Context = client
 
 		if err := server.PingTest(nil); err != nil {
 			lastErr = fmt.Errorf("server %s: ping test: %w", server.Name, err)
-			continue
-		}
-
-		latencyMs := float64(server.Latency) / float64(time.Millisecond)
-		if latencyMs > maxLatencyMs {
-			lastErr = fmt.Errorf("server %s: latency too high (%.0f ms)", server.Name, latencyMs)
 			continue
 		}
 
@@ -81,7 +52,7 @@ func runSpeedTest() (*SpeedTestResult, error) {
 		}
 
 		dlMbps := server.DLSpeed.Mbps()
-		if dlMbps < minDownloadMbps {
+		if dlMbps < 1.0 {
 			lastErr = fmt.Errorf("server %s: download too low (%.2f Mbps)", server.Name, dlMbps)
 			continue
 		}
@@ -96,7 +67,7 @@ func runSpeedTest() (*SpeedTestResult, error) {
 			ServerName:   server.Name,
 			ServerHost:   server.Host,
 			ServerID:     server.ID,
-			LatencyMs:    latencyMs,
+			LatencyMs:    float64(server.Latency) / float64(time.Millisecond),
 			DownloadMbps: dlMbps,
 			UploadMbps:   server.ULSpeed.Mbps(),
 		}, nil
