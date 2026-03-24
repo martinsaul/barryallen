@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"io"
 	"os"
 	"strings"
 
@@ -44,6 +45,7 @@ func main() {
 			fmt.Println("Service stopped.")
 			return
 		case "run":
+			log.SetOutput(io.Discard)
 			// Run a single speed test and print results (useful for testing)
 			result, err := runSpeedTest(nil)
 			if err != nil {
