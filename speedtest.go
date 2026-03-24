@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"net"
+	"strings"
 	"time"
 
 	"github.com/showwin/speedtest-go/speedtest"
@@ -9,31 +11,69 @@ import (
 
 // SpeedTestResult holds the results of a single speed test.
 type SpeedTestResult struct {
-	Timestamp    time.Time
-	ServerName   string
-	ServerHost   string
-	ServerID     string
-	LatencyMs    float64
-	DownloadMbps float64
-	UploadMbps   float64
+	Timestamp     time.Time
+	ServerName    string
+	ServerHost    string
+	ServerID      string
+	LatencyMs     float64
+	DownloadMbps  float64
+	UploadMbps    float64
+	Status        string
+	ServersTested string
 }
 
 const maxServersToTry = 10
 
 type failedServer struct {
-	id   string
-	name string
+	id     string
+	name   string
 	reason string
+}
+
+func checkConnectivity() bool {
+	targets := []string{"8.8.8.8:53", "1.1.1.1:53"}
+	for _, target := range targets {
+		conn, err := net.DialTimeout("tcp", target, 5*time.Second)
+		if err == nil {
+			conn.Close()
+			return true
+		}
+	}
+	return false
+}
+
+func formatServersTested(failures []failedServer) string {
+	var parts []string
+	for _, f := range failures {
+		parts = append(parts, fmt.Sprintf("%s (%s)", f.name, f.id))
+	}
+	return strings.Join(parts, "; ")
 }
 
 func runSpeedTest(blacklist *ServerBlacklist) (*SpeedTestResult, error) {
 	serverList, err := speedtest.FetchServers()
 	if err != nil {
-		return nil, fmt.Errorf("fetching servers: %w", err)
+		online := checkConnectivity()
+		status := "offline"
+		if online {
+			status = "online"
+		}
+		return &SpeedTestResult{
+			Timestamp: time.Now(),
+			Status:    status,
+		}, fmt.Errorf("fetching servers: %w", err)
 	}
 
 	if len(serverList) == 0 {
-		return nil, fmt.Errorf("no speed test servers found")
+		online := checkConnectivity()
+		status := "offline"
+		if online {
+			status = "online"
+		}
+		return &SpeedTestResult{
+			Timestamp: time.Now(),
+			Status:    status,
+		}, fmt.Errorf("no speed test servers found")
 	}
 
 	tried := 0
@@ -84,8 +124,7 @@ func runSpeedTest(blacklist *ServerBlacklist) (*SpeedTestResult, error) {
 			continue
 		}
 
-		// A server succeeded — blacklist the ones that failed during this run,
-		// since the internet was clearly working.
+		// A server succeeded — blacklist the ones that failed.
 		if blacklist != nil {
 			for _, f := range failures {
 				blacklist.Strike(f.id, f.name, f.reason)
@@ -93,19 +132,41 @@ func runSpeedTest(blacklist *ServerBlacklist) (*SpeedTestResult, error) {
 		}
 
 		return &SpeedTestResult{
-			Timestamp:    time.Now(),
-			ServerName:   server.Name,
-			ServerHost:   server.Host,
-			ServerID:     server.ID,
-			LatencyMs:    float64(server.Latency) / float64(time.Millisecond),
-			DownloadMbps: dlMbps,
-			UploadMbps:   ulMbps,
+			Timestamp:     time.Now(),
+			ServerName:    server.Name,
+			ServerHost:    server.Host,
+			ServerID:      server.ID,
+			LatencyMs:     float64(server.Latency) / float64(time.Millisecond),
+			DownloadMbps:  dlMbps,
+			UploadMbps:    ulMbps,
+			Status:        "online",
+			ServersTested: formatServersTested(failures),
 		}, nil
 	}
 
-	// All servers failed — likely an internet outage, don't blacklist anyone.
-	if tried == 0 {
-		return nil, fmt.Errorf("all servers are blacklisted")
+	// All servers failed — check actual connectivity.
+	online := checkConnectivity()
+	status := "offline"
+	if online {
+		status = "online"
+		// Internet is up, so these servers are genuinely broken — blacklist them.
+		if blacklist != nil {
+			for _, f := range failures {
+				blacklist.Strike(f.id, f.name, f.reason)
+			}
+		}
 	}
-	return nil, fmt.Errorf("all %d servers failed (possible connectivity issue), last error: %w", tried, lastErr)
+
+	if tried == 0 {
+		return &SpeedTestResult{
+			Timestamp: time.Now(),
+			Status:    status,
+		}, fmt.Errorf("all servers are blacklisted")
+	}
+
+	return &SpeedTestResult{
+		Timestamp:     time.Now(),
+		Status:        status,
+		ServersTested: formatServersTested(failures),
+	}, fmt.Errorf("all %d servers failed, last error: %w", tried, lastErr)
 }

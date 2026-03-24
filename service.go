@@ -21,7 +21,7 @@ const (
 
 var csvHeader = []string{
 	"timestamp", "server_name", "server_host", "latency_ms",
-	"download_mbps", "upload_mbps", "server_id",
+	"download_mbps", "upload_mbps", "server_id", "status", "servers_tested",
 }
 
 type barryAllenService struct{}
@@ -87,14 +87,16 @@ func runAndRecord(logger *log.Logger, blacklist *ServerBlacklist) {
 	result, err := runSpeedTest(blacklist)
 	if err != nil {
 		logger.Printf("ERROR: Speed test failed: %v", err)
-		return
+	} else {
+		logger.Printf("Speed test complete: %.2f/%.2f Mbps (down/up), %.2f ms latency, server: %s (%s)",
+			result.DownloadMbps, result.UploadMbps, result.LatencyMs, result.ServerName, result.ServerID)
 	}
 
-	logger.Printf("Speed test complete: %.2f/%.2f Mbps (down/up), %.2f ms latency, server: %s (%s)",
-		result.DownloadMbps, result.UploadMbps, result.LatencyMs, result.ServerName, result.ServerID)
-
-	if err := appendCSV(result); err != nil {
-		logger.Printf("ERROR: Failed to write CSV: %v", err)
+	// Always record a row
+	if result != nil {
+		if csvErr := appendCSV(result); csvErr != nil {
+			logger.Printf("ERROR: Failed to write CSV: %v", csvErr)
+		}
 	}
 }
 
@@ -127,15 +129,28 @@ func appendCSV(r *SpeedTestResult) error {
 	}
 	defer f.Close()
 
+	dlStr, ulStr, latStr := "", "", ""
+	if r.DownloadMbps > 0 {
+		dlStr = fmt.Sprintf("%.2f", r.DownloadMbps)
+	}
+	if r.UploadMbps > 0 {
+		ulStr = fmt.Sprintf("%.2f", r.UploadMbps)
+	}
+	if r.LatencyMs > 0 {
+		latStr = fmt.Sprintf("%.2f", r.LatencyMs)
+	}
+
 	w := csv.NewWriter(f)
 	record := []string{
 		r.Timestamp.Format(time.RFC3339),
 		r.ServerName,
 		r.ServerHost,
-		fmt.Sprintf("%.2f", r.LatencyMs),
-		fmt.Sprintf("%.2f", r.DownloadMbps),
-		fmt.Sprintf("%.2f", r.UploadMbps),
+		latStr,
+		dlStr,
+		ulStr,
 		r.ServerID,
+		r.Status,
+		r.ServersTested,
 	}
 	if err := w.Write(record); err != nil {
 		return err
