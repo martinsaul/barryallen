@@ -51,7 +51,7 @@ func runSpeedTest() (*SpeedTestResult, error) {
 		ServerHost:   server.Host,
 		ServerID:     server.ID,
 		LatencyMs:    float64(server.Latency) / float64(time.Millisecond),
-		DownloadMbps: float64(server.DLSpeed),
-		UploadMbps:   float64(server.ULSpeed),
+		DownloadMbps: server.DLSpeed.Mbps(),
+		UploadMbps:   server.ULSpeed.Mbps(),
 	}, nil
 }
