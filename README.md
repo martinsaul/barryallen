@@ -41,6 +41,8 @@ Invoke-WebRequest -Uri "https://raw.githubusercontent.com/martinsaul/barryallen/
 | download_mbps | Download speed in Mbps |
 | upload_mbps | Upload speed in Mbps |
 | server_id | Server identifier |
+| status | Online/offline connectivity status |
+| servers_tested | List of servers that failed |
 
 ## Manual Commands
 
@@ -67,11 +69,3 @@ C:\speedtest\barryallen.exe uninstall
 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o barryallen.exe .
 ```
 
-## Releasing
-
-Push a version tag to trigger a GitHub Actions build:
-
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
